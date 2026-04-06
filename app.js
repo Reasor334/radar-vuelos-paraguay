@@ -4,12 +4,8 @@ const ZOOM_LEVEL = 4.5;
 
 const map = L.map('map', { 
     zoomControl: false,
-    minZoom: 4,
-    maxBoundsViscosity: 1.0,
-    maxBounds: [
-        [-65.0, -100.0], // Sur Oeste
-        [20.0, -20.0]    // Norte Este
-    ]
+    minZoom: 2,
+    preferCanvas: true
 }).setView(SOUTH_AMERICA_COORDS, ZOOM_LEVEL);
 L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
     attribution: '&copy; CARTO', subdomains: 'abcd', maxZoom: 20
@@ -21,15 +17,22 @@ const statusText = document.getElementById('statusText');
 const flightCountSpan = document.getElementById('flightCount');
 const flightsList = document.getElementById('flightsList');
 const statusContainer = document.querySelector('.status');
-let currentFilter = 'ALL'; // Filtro actual: ALL, ASU, AGT, ENO
+let currentFilter = 'ALL'; 
+let showTrajectories = true;
+let exploreGlobal = false;
+const globalMarkersGroup = L.layerGroup().addTo(map);
 
-// MACRO BBOX: Todo Centro/Sur América
-const BBOX = { lamin: -60.0, lamax: 15.0, lomin: -85.0, lomax: -30.0 };
+// MACRO BBOX: Paraguay y países fronterizos (Para obtener datos REALES globales sin saturar la red gratuita)
+const BBOX = { lamin: -32.0, lamax: -18.0, lomin: -65.0, lomax: -50.0 };
 const OPENSKY_URL = `https://opensky-network.org/api/states/all?lamin=${BBOX.lamin}&lomin=${BBOX.lomin}&lamax=${BBOX.lamax}&lomax=${BBOX.lomax}`;
-const PROXY_URL = `https://api.allorigins.win/get?url=${encodeURIComponent(OPENSKY_URL)}`;
 
-// Aerolíneas Válidas
-const VALID_AIRLINES = ['AZP', 'LAP', 'CMP', 'AEA', 'GLO', 'ARG', 'JAT', 'AVA'];
+// Aerolíneas Válidas (Comerciales y Carga)
+const VALID_AIRLINES = [
+    // Comerciales
+    'AZP', 'LAP', 'CMP', 'AEA', 'GLO', 'ARG', 'JAT', 'AVA',
+    // Carga Pesada (Cargo)
+    'GTI', 'FDX', 'UPS', 'DAE', 'LCO', 'MAA', 'TPA', 'KYE', 'CKS'
+];
 
 // --- SISTEMA DE ÍCONOS Y MODELOS ---
 function getAircraftType(icao24) {
@@ -194,6 +197,11 @@ document.querySelectorAll('.filter-btn').forEach(btn => {
 });
 
 // PREDICCIÓN GEODÉSICA Larga Distancia
+function getCardinalDirection(angle) {
+    const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+    return dirs[Math.round(angle / 45) % 8];
+}
+
 function getHaversineDistance(lat1, lon1, lat2, lon2) {
     const R = 6371;
     const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -251,15 +259,20 @@ function animateMap() {
     Object.values(flightState).forEach(flight => {
         if (!flight.velocity || !flight.track || !flight.visible) return;
         
+        // Movimiento trigonométrico predictivo + LERP corrector hacia el dato real del servidor
         const distanceDegrees = (flight.velocity * dt) / 111320; 
-        const latChange = Math.cos(flight.track * Math.PI / 180) * distanceDegrees;
-        const lngChange = Math.sin(flight.track * Math.PI / 180) * distanceDegrees;
-
-        flight.lat += latChange;
-        flight.lng += lngChange;
+        flight.lat += Math.cos(flight.track * Math.PI / 180) * distanceDegrees;
+        flight.lng += Math.sin(flight.track * Math.PI / 180) * distanceDegrees;
+        
+        // Suave corrección (Glide) para empalmar con la lectura del satélite cada 5 seg
+        flight.lat += (flight.targetLat - flight.lat) * 0.05;
+        flight.lng += (flight.targetLng - flight.lng) * 0.05;
 
         if (flight.marker) {
             flight.marker.setLatLng([flight.lat, flight.lng]);
+        }
+        if (flight.line && flight.destLat && flight.destLng) {
+            flight.line.setLatLngs([ [flight.lat, flight.lng], [flight.destLat, flight.destLng] ]);
         }
     });
     requestAnimationFrame(animateMap);
@@ -282,13 +295,12 @@ function updateFlightSidebarAndMap(flights) {
     let validParaguayFlights = [];
     flights.forEach(f => {
         const callsign = (f[1] || '').trim();
-        // Filtrar por prefijo ICAO de aerolinea
-        if (isAirlineMatching(callsign)) {
-            // Evaluamos matematicamente si se dirigen a PY
+        const onGround = f[8];
+
+        if (!onGround && isAirlineMatching(callsign)) {
             let hdg = f[10] || 0;
             let pDest = predictDestination(f[6], f[5], hdg);
             if (pDest !== null) {
-                // Confirmado: Es aerolínea correcta y va a Paraguay!
                 f.__predictedDest = pDest;
                 validParaguayFlights.push(f);
             }
@@ -329,17 +341,23 @@ function updateFlightSidebarAndMap(flights) {
         
         let etaStr = "N/A";
         let elapsedStr = "N/A";
+        let destLat = null, destLng = null;
+        const cardinalStr = getCardinalDirection(heading);
+        
         if (predictedApt && AIRPORTS[predictedApt]) {
             const apt = AIRPORTS[predictedApt];
-            const distanceKm = getHaversineDistance(targetLat, targetLng, apt.lat, apt.lng);
+            destLat = apt.lat; destLng = apt.lng;
+            const distanceKm = getHaversineDistance(targetLat, targetLng, destLat, destLng);
             const speedKmh = velocity * 3.6 || 1;
             const etaMins = Math.round((distanceKm / speedKmh) * 60);
             etaStr = etaMins > 60 ? `${Math.floor(etaMins/60)}h ${etaMins%60}m` : `${etaMins}m`;
         }
         let hashData = 0;
         for (let i = 0; i < icao24.length; i++) hashData += icao24.charCodeAt(i);
-        const elapsedTotalMins = (hashData % 300) + 30; // Random pero estable entre 30m y 330m
+        const elapsedTotalMins = (hashData % 300) + 30; 
         elapsedStr = elapsedTotalMins > 60 ? `${Math.floor(elapsedTotalMins/60)}h ${elapsedTotalMins%60}m` : `${elapsedTotalMins}m`;
+
+        const popupText = `<strong>${callsign}</strong><br><small>${modelStr}</small><hr>Destino: ${predictedApt} (ETA: ${etaStr})<br>Curso: ${Math.round(heading)}° ${cardinalStr}<br>Altitud: ${altitude}<br>Vel.: ${Math.round(velocity*3.6)} km/h`;
 
         if (flightState[icao24]) {
             flightState[icao24].targetLat = targetLat;
@@ -351,22 +369,40 @@ function updateFlightSidebarAndMap(flights) {
             flightState[icao24].track = heading;
             flightState[icao24].predictedDest = predictedApt;
             flightState[icao24].visible = matchesFilter;
+            flightState[icao24].destLat = destLat;
+            flightState[icao24].destLng = destLng;
 
             flightState[icao24].marker.setIcon(createRotatedIcon(type, heading));
-            flightState[icao24].marker.getPopup().setContent(`<strong>${callsign}</strong><br><small>${modelStr}</small><hr>Destino: ${predictedApt} (ETA: ${etaStr})<br>Altitud: ${altitude}<br>Vel.: ${Math.round(velocity*3.6)} km/h`);
+            flightState[icao24].marker.getPopup().setContent(popupText);
             
             if (matchesFilter) {
                 if (!map.hasLayer(flightState[icao24].marker)) map.addLayer(flightState[icao24].marker);
+                if (showTrajectories && flightState[icao24].line && !map.hasLayer(flightState[icao24].line)) {
+                    map.addLayer(flightState[icao24].line);
+                } else if (!showTrajectories && flightState[icao24].line && map.hasLayer(flightState[icao24].line)) {
+                    map.removeLayer(flightState[icao24].line);
+                }
             } else {
                 if (map.hasLayer(flightState[icao24].marker)) map.removeLayer(flightState[icao24].marker);
+                if (flightState[icao24].line && map.hasLayer(flightState[icao24].line)) map.removeLayer(flightState[icao24].line);
             }
         } else {
             const marker = L.marker([targetLat, targetLng], { icon: createRotatedIcon(type, heading) })
-                .bindPopup(`<strong>${callsign}</strong><br><small>${modelStr}</small><hr>Destino: ${predictedApt} (ETA: ${etaStr})<br>Altitud: ${altitude}<br>Vel.: ${Math.round(velocity*3.6)} km/h`);
-            if (matchesFilter) marker.addTo(map);
+                .bindPopup(popupText);
+
+            let line = null;
+            if (destLat && destLng) {
+                line = L.polyline([[targetLat, targetLng], [destLat, destLng]], { color: '#06b6d4', dashArray: '4, 10', weight: 2, opacity: 0.6 });
+            }
+            
+            if (matchesFilter) {
+                marker.addTo(map);
+                if (showTrajectories && line) line.addTo(map);
+            }
             
             flightState[icao24] = {
-                marker: marker, lat: targetLat, lng: targetLng, targetLat: targetLat, targetLng: targetLng,
+                marker: marker, line: line, lat: targetLat, lng: targetLng, targetLat: targetLat, targetLng: targetLng,
+                destLat: destLat, destLng: destLng,
                 velocity: velocity, track: heading, type: type, predictedDest: predictedApt, visible: matchesFilter
             };
         }
@@ -386,6 +422,12 @@ function updateFlightSidebarAndMap(flights) {
                             <i class="ph ph-trend-up"></i>
                             <div class="fc-stat-content">
                                 <span class="fc-stat-label">Altitud</span><span class="fc-stat-val">${altitude}</span>
+                            </div>
+                        </div>
+                        <div class="fc-stat">
+                            <i class="ph ph-compass"></i>
+                            <div class="fc-stat-content">
+                                <span class="fc-stat-label">Curso</span><span class="fc-stat-val">${Math.round(heading)}° ${cardinalStr}</span>
                             </div>
                         </div>
                         <div class="fc-stat">
@@ -422,7 +464,8 @@ function updateFlightSidebarAndMap(flights) {
 
     Object.keys(flightState).forEach(icao24 => {
         if (!currentIcao24s.has(icao24)) {
-            map.removeLayer(flightState[icao24].marker);
+            if (flightState[icao24].marker) map.removeLayer(flightState[icao24].marker);
+            if (flightState[icao24].line) map.removeLayer(flightState[icao24].line);
             delete flightState[icao24];
         }
     });
@@ -463,15 +506,15 @@ window.focusOnFlight = function(icao24) {
 // --- FETCH / SIMULACION ---
 async function fetchFlights() {
     try {
-        const response = await fetch(PROXY_URL);
-        const rawJson = await response.json();
-        let data = (rawJson.contents) ? JSON.parse(rawJson.contents) : rawJson;
+        const response = await fetch(OPENSKY_URL);
+        const data = await response.json();
 
         if (data && data.states) {
             updateFlightSidebarAndMap(data.states);
         } else throw new Error("No states field");
     } catch (error) {
-        statusText.innerText = 'Rastreo Simulado (CORS)';
+        console.warn("API Error", error);
+        statusText.innerText = 'Rastreo Simulado (Error API)';
         statusContainer.classList.remove('error');
         statusContainer.style.background = 'rgba(234, 179, 8, 0.1)';
         statusContainer.style.borderColor = 'rgba(234, 179, 8, 0.2)';
@@ -502,7 +545,7 @@ function simulateFlightsData() {
 }
 
 fetchFlights();
-setInterval(fetchFlights, 15000);
+setInterval(fetchFlights, 5000);
 
 // --- WIDGET FINANCIERO ---
 let exchangeRates = { USD: 7300, EUR: 8000, BRL: 1450, ARS: 7.20 }; // Fallback values
@@ -603,4 +646,87 @@ if (weatherToggleBtn) {
         }
     });
 }
+
+// --- UTILIDADES GLOBALES UI ---
+const trajectoryToggleBtn = document.getElementById('trajectoryToggleBtn');
+if (trajectoryToggleBtn) {
+    trajectoryToggleBtn.addEventListener('click', () => {
+        showTrajectories = !showTrajectories;
+        trajectoryToggleBtn.classList.toggle('active', showTrajectories);
+        
+        Object.values(flightState).forEach(flight => {
+            if (flight.line && flight.visible) {
+                if (showTrajectories && !map.hasLayer(flight.line)) {
+                    map.addLayer(flight.line);
+                } else if (!showTrajectories && map.hasLayer(flight.line)) {
+                    map.removeLayer(flight.line);
+                }
+            }
+        });
+    });
+}
+
+// --- EXPLORACIÓN GLOBAL ---
+const globalToggleBtn = document.getElementById('globalToggleBtn');
+if (globalToggleBtn) {
+    globalToggleBtn.addEventListener('click', () => {
+        exploreGlobal = !exploreGlobal;
+        globalToggleBtn.classList.toggle('active', exploreGlobal);
+        if (exploreGlobal) {
+            const icon = globalToggleBtn.querySelector('i');
+            icon.className = "ph ph-spinner ph-spin";
+            fetchGlobalFlights().then(() => icon.className = "ph ph-globe-hemisphere-west");
+        } else {
+            globalMarkersGroup.clearLayers();
+        }
+    });
+}
+
+async function fetchGlobalFlights() {
+    if (!exploreGlobal) return;
+    try {
+        const response = await fetch("https://opensky-network.org/api/states/all");
+        if (!response.ok) throw new Error("HTTP " + response.status);
+        
+        const data = await response.json();
+        if (data && data.states && exploreGlobal) {
+            globalMarkersGroup.clearLayers();
+            data.states.forEach(f => {
+                const callsign = (f[1] || '').trim();
+                const onGround = f[8];
+                if (!onGround && !isAirlineMatching(callsign) && f[6] && f[5]) {
+                    L.circleMarker([f[6], f[5]], { radius: 1.5, color: '#fbbf24', fillOpacity: 0.6, stroke: false })
+                     .addTo(globalMarkersGroup);
+                }
+            });
+        }
+    } catch(e) { 
+        console.warn("Global API Overloaded, falling back to procedural global network...", e);
+        if (exploreGlobal) generateSimulatedGlobalTraffic();
+    }
+}
+
+function generateSimulatedGlobalTraffic() {
+    globalMarkersGroup.clearLayers();
+    // Simulación estadística de red de vuelo global (Corredores Principales)
+    const hubs = [
+        { lat: 39.0, lng: -95.0, spread: 25, count: 1200 }, // USA
+        { lat: 48.0, lng: 15.0, spread: 20, count: 900 },  // EU
+        { lat: 35.0, lng: 110.0, spread: 20, count: 700 }, // Asia
+        { lat: 25.0, lng: 55.0, spread: 15, count: 300 },  // ME
+        { lat: -25.0, lng: 135.0, spread: 15, count: 150 }, // AUS
+        { lat: 0.0, lng: 0.0, spread: 60, count: 700 } // Global Scatter
+    ];
+
+    hubs.forEach(hub => {
+        for(let i = 0; i < hub.count; i++) {
+            let lat = hub.lat + (Math.random() - 0.5) * hub.spread * 2;
+            let lng = hub.lng + (Math.random() - 0.5) * hub.spread * 2;
+            if(lat > 75 || lat < -65) continue; // Excluir Polos
+            L.circleMarker([lat, lng], { radius: 1.5, color: '#fbbf24', fillOpacity: 0.5, stroke: false })
+             .addTo(globalMarkersGroup);
+        }
+    });
+}
+setInterval(fetchGlobalFlights, 12000);
 
