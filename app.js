@@ -562,3 +562,45 @@ async function fetchExchangeRates() {
 fetchExchangeRates();
 setInterval(fetchExchangeRates, 3600000);
 
+// --- CLIMA (RADAR METEOROLÓGICO) ---
+const weatherToggleBtn = document.getElementById('weatherToggleBtn');
+let weatherLayer = null;
+
+async function initWeatherRadar() {
+    try {
+        const response = await fetch("https://api.rainviewer.com/public/weather-maps.json");
+        const data = await response.json();
+        if (data.radar && data.radar.past && data.radar.past.length > 0) {
+            const latestObj = data.radar.past[data.radar.past.length - 1];
+            // 2 = Color scheme (Titan), 1_1 = opacity/smooth
+            weatherLayer = L.tileLayer(`${data.host}${latestObj.path}/256/{z}/{x}/{y}/2/1_1.png`, {
+                opacity: 0.7,
+                zIndex: 10
+            });
+        }
+    } catch(err) {
+        console.warn("Fallo al obtener radar de clima:", err);
+    }
+}
+
+if (weatherToggleBtn) {
+    weatherToggleBtn.addEventListener('click', async () => {
+        if (!weatherLayer) {
+            const icon = weatherToggleBtn.querySelector('i');
+            icon.className = "ph ph-spinner ph-spin";
+            await initWeatherRadar();
+            icon.className = "ph ph-cloud-rain";
+        }
+        
+        if (weatherLayer) {
+            if (map.hasLayer(weatherLayer)) {
+                map.removeLayer(weatherLayer);
+                weatherToggleBtn.classList.remove('active');
+            } else {
+                map.addLayer(weatherLayer);
+                weatherToggleBtn.classList.add('active');
+            }
+        }
+    });
+}
+

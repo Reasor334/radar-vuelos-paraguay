@@ -212,7 +212,18 @@ body {
 .mobile-toggle-btn:active { transform: translateX(-50%) scale(0.95); }
 .mobile-badge { background: #000; color: var(--accent-color); padding: 2px 8px; border-radius: 12px; font-size: 12px; margin-left: 4px; }
 
-/* Currency Widget */
+/* Currency & Weather Widgets */
+.weather-toggle-btn {
+    position: fixed; bottom: 30px; right: 100px; z-index: 1000;
+    width: 60px; height: 60px; border-radius: 50%;
+    background: var(--bg-card); color: var(--text-primary); border: 2px solid var(--border-color);
+    box-shadow: 0 10px 25px rgba(0,0,0,0.5); cursor: pointer; display: flex; align-items: center; justify-content: center;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.weather-toggle-btn i { font-size: 32px; }
+.weather-toggle-btn:hover { transform: scale(1.1); border-color: #3b82f6; background: rgba(59, 130, 246, 0.1); }
+.weather-toggle-btn.active { background: rgba(59, 130, 246, 0.2); color: #60a5fa; border-color: #3b82f6; }
+
 .currency-toggle-btn {
     position: fixed; bottom: 30px; right: 30px; z-index: 1000;
     width: 60px; height: 60px; border-radius: 50%;
@@ -255,6 +266,8 @@ body {
 @media (max-width: 768px) {
     .currency-toggle-btn { bottom: 90px; right: 20px; width: 50px; height: 50px; }
     .currency-toggle-btn i { font-size: 24px; }
+    .weather-toggle-btn { bottom: 90px; right: 80px; width: 50px; height: 50px; }
+    .weather-toggle-btn i { font-size: 24px; }
     .currency-panel { bottom: 155px; right: 20px; left: 20px; width: auto; max-width: calc(100vw - 40px); }
 
     .sidebar { 
