@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Radar de Vuelos - Paraguay</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <!-- Custom Styles -->
+    <link rel="stylesheet" href="style.css">
+    <!-- Phosphor Icons -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+</head>
+<body>
+    <div id="map"></div>
+
+    <button id="mobileFlightsToggle" class="mobile-toggle-btn">
+        <i class="ph ph-list"></i> Ver Vuelos <span id="mobileBadge" class="mobile-badge">0</span>
+    </button>
+
+    <aside class="sidebar">
+        <header class="sidebar-header">
+            <div class="logo">
+                <i class="ph ph-radar"></i>
+                <h1>AeroRadar <span>PY</span></h1>
+            </div>
+            <div class="header-right">
+                <div class="status">
+                    <span class="status-dot"></span>
+                    <span class="status-text" id="statusText">Conectando...</span>
+                </div>
+                <button id="closeSidebarMobile" class="mobile-only-btn"><i class="ph ph-caret-down"></i></button>
+            </div>
+        </header>
+
+        <div class="stats-container">
+            <div class="stat-box">
+                <span class="stat-label">Vuelos en Radar</span>
+                <span class="stat-value" id="flightCount">0</span>
+            </div>
+        </div>
+
+        <div class="filters-container" id="flightFilters">
+            <button class="filter-btn active" data-filter="ALL">Todos</button>
+            <button class="filter-btn" data-filter="ASU">ASU</button>
+            <button class="filter-btn" data-filter="AGT">AGT</button>
+            <button class="filter-btn" data-filter="ENO">ENO</button>
+        </div>
+
+        <div class="flights-list-container">
+            <ul id="flightsList" class="flights-list">
+                <li class="loading-state">
+                    <i class="ph ph-spinner-gap ph-spin"></i>
+                    <p>Escaneando el espacio aéreo...</p>
+                </li>
+            </ul>
+        </div>
+    </aside>
+
+    <!-- Widget Financiero -->
+    <button id="currencyToggleBtn" class="currency-toggle-btn" title="Cotizaciones y Conversor">
+        <i class="ph ph-currency-circle-dollar"></i>
+    </button>
+
+    <div id="currencyPanel" class="currency-panel hidden">
+        <header class="currency-header">
+            <h3><i class="ph ph-trend-up"></i> Tasa de Cambio</h3>
+            <button id="closeCurrencyBtn" class="btn-close"><i class="ph ph-x"></i></button>
+        </header>
+        
+        <div class="currency-rates">
+            <div class="rate-item"><span>1 USD</span> <strong id="rateUSD">...</strong></div>
+            <div class="rate-item"><span>1 EUR</span> <strong id="rateEUR">...</strong></div>
+            <div class="rate-item"><span>1 BRL</span> <strong id="rateBRL">...</strong></div>
+            <div class="rate-item"><span>1 ARS</span> <strong id="rateARS">...</strong></div>
+        </div>
+
+        <div class="currency-calculator">
+            <label>Calculadora (A Guaraníes)</label>
+            <div class="calc-row">
+                <select id="calcCurrencySelect">
+                    <option value="USD">USD</option>
+                    <option value="EUR">EUR</option>
+                    <option value="BRL">BRL</option>
+                    <option value="ARS">ARS</option>
+                </select>
+                <input type="number" id="calcInputAmount" placeholder="Monto" value="100" min="0">
+            </div>
+            <div class="calc-result">
+                <span>PYG</span> <strong id="calcResultPYG">0</strong>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Aeropuerto (Tablero) -->
+    <div id="airportModal" class="modal-overlay hidden">
+        <div class="modal-content">
+            <header class="modal-header">
+                <div class="modal-titles">
+                    <h2 id="modalAirportTitle">Aeropuerto</h2>
+                    <p id="modalAirportCode" class="subtitle">---</p>
+                </div>
+                <button id="closeModal" class="btn-close"><i class="ph ph-x"></i></button>
+            </header>
+            <div class="modal-tabs">
+                <button class="tab-btn active" data-tab="arrivals">Llegadas</button>
+                <button class="tab-btn" data-tab="departures">Salidas</button>
+                <button class="tab-btn" data-tab="scheduled">Programados</button>
+            </div>
+            <div class="table-container">
+                <table class="flight-table">
+                    <thead>
+                        <tr>
+                            <th>Vuelo</th>
+                            <th>Origen/Destino</th>
+                            <th>Hora P.</th>
+                            <th>Estado</th>
+                        </tr>
+                    </thead>
+                    <tbody id="boardTableBody">
+                        <!-- Se inserta por JS -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <script src="app.js"></script>
+</body>
+</html>
